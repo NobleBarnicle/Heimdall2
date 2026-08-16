@@ -78,6 +78,29 @@ class BackupRead(BaseModel):
     created_at: datetime
 
 
+class OntologyVersionRead(BaseModel):
+    version: str
+    snapshot_json: dict[str, object]
+    fingerprint: str
+    change_note: str
+    recorded_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class OntologyValueMigrationRead(BaseModel):
+    id: str
+    from_version: str
+    to_version: str
+    field: str
+    previous_value: str
+    replacement_value: str | None
+    reason: str
+    recorded_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
 class StatuteSnapshotRead(BaseModel):
     id: str
     short_title: str

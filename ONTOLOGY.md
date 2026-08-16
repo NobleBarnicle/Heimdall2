@@ -213,8 +213,18 @@ Trigger captures a factual or procedural feature that should prompt retrieval of
 3. When adding, renaming, or retiring a value, increment this document's semantic version.
 4. Document the migration mapping for any changed value.
 5. Preserve the ontology version on every annotation so historic records remain interpretable.
+6. Never alter a version that has been registered in a Heimdall library. Create a new version instead.
 
-## Version Notes
+## Version History
 
-- **0.3.0:** `Decision Track` renamed to `Research Track` to make the proposition—not the case—the unit of classification. Added appeal/review result values for Bail.
-- **0.4.0:** Added proposition-level `Bail Factors`. Replaced combined Bail result labels with explicit release, review, and appeal outcomes. Existing annotations retain their stored ontology version and historic result values.
+| Version | Summary |
+| --- | --- |
+| 0.3.0 | `Decision Track` renamed to `Research Track` to make the proposition—not the case—the unit of classification. Added appeal/review result values for Bail. |
+| 0.4.0 | Added proposition-level `Bail Factors`. Replaced combined Bail result labels with explicit release, review, and appeal outcomes. Existing annotations retain their stored ontology version and historic result values. |
+
+## Value Migrations
+
+When a controlled value is renamed or retired, add one row for each old value. These mappings support interpretation and retrieval across versions; they never silently rewrite annotations made under an earlier version.
+
+| From version | To version | Field | Previous value | Replacement value | Reason |
+| --- | --- | --- | --- | --- | --- |

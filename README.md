@@ -40,3 +40,17 @@ The API applies recorded, forward-only local database migrations. Before it appl
 Use the **Back up** button beside Saved propositions before a substantial annotation session; the **Export** link downloads a versioned JSON file containing annotations, document identity, and the cited paragraph text. Neither backups nor exports are added to Git.
 
 For the first pilot, ingest a deliberately varied set of 12–20 decisions and create 40–80 annotations. Note repeated use of an `Other` value or fields you consistently leave blank—those are the evidence for the next ontology and workflow changes.
+
+## Evolving the ontology safely
+
+The first time a version runs against a library, Heimdall stores an immutable local snapshot of its annotation fields, allowed values, and value meanings. It rejects any later in-place change to that registered version. This protects the meaning of existing annotations even after the project evolves.
+
+To make an ontology change:
+
+1. Edit [ONTOLOGY.md](ONTOLOGY.md), including the field table or controlled values.
+2. Increment `**Version:**` and add a row to **Version History** describing the change.
+3. For a renamed or retired controlled value, add one **Value Migrations** row for each old value. Use `—` as the replacement when a value is retired without a direct successor.
+4. When adding or removing an actual annotation field, add a forward-only database migration, update the API and UI, and decide explicitly whether earlier annotations need a backfill. Do not silently infer one.
+5. Restart the API. It creates and stores the new version snapshot; if the old version changed in place, it stops with an explanation instead.
+
+Historic annotations retain their original values and ontology version. Value migrations are interpretation and retrieval maps, not automated rewrites. The registry is available at `/api/ontology/versions` and `/api/ontology/value-migrations`.

@@ -114,6 +114,36 @@ class AnnotationFacet(Base):
     annotation: Mapped[Annotation] = relationship(back_populates="facets")
 
 
+class OntologyVersion(Base):
+    """An immutable local copy of the vocabulary used by annotations."""
+
+    __tablename__ = "ontology_versions"
+
+    version: Mapped[str] = mapped_column(String, primary_key=True)
+    snapshot_json: Mapped[dict[str, object]] = mapped_column(JSON)
+    fingerprint: Mapped[str] = mapped_column(String)
+    change_note: Mapped[str] = mapped_column(Text)
+    recorded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
+class OntologyValueMigration(Base):
+    """A documented cross-version meaning map; it never mutates annotations automatically."""
+
+    __tablename__ = "ontology_value_migrations"
+    __table_args__ = (
+        UniqueConstraint("from_version", "to_version", "field", "previous_value", name="uq_ontology_value_migration"),
+    )
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid4()))
+    from_version: Mapped[str] = mapped_column(String, index=True)
+    to_version: Mapped[str] = mapped_column(String, index=True)
+    field: Mapped[str] = mapped_column(String)
+    previous_value: Mapped[str] = mapped_column(String)
+    replacement_value: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    reason: Mapped[str] = mapped_column(Text)
+    recorded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
 class StatuteSnapshot(Base):
     __tablename__ = "statute_snapshots"
 

@@ -1,13 +1,17 @@
 from __future__ import annotations
 
 from datetime import date
+from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 
-from app.database import Base, engine, ensure_schema
+from app.database import Base, SessionLocal, engine, ensure_schema
 from app.extraction import extract_paragraphs_from_pages
 from app.main import app
 from app.models import Document, Paragraph
+from app.ontology import load_ontology
+from app.ontology_registry import synchronize_ontology_registry
 from app.statutes import parse_archived_provisions, parse_provisions
 
 
@@ -107,9 +111,15 @@ def test_annotation_validation_and_statute_lookup(monkeypatch, tmp_path) -> None
         assert client.get("/api/health").json() == {"status": "ok"}
         ontology = client.get("/api/ontology").json()
         assert ontology["version"] == "0.4.0"
+        assert ontology["snapshot"]["annotation_fields"][0]["field"] == "Case"
         assert ontology["vocabularies"]["Research Track"] == ["Merits", "Sentencing", "Bail", "Charter and Procedure", "Other"]
         assert "Appeal granted" in ontology["vocabularies"]["Bail Result"]
         assert "Indigenous accused / Gladue" in ontology["vocabularies"]["Bail Factors"]
+        registered_ontologies = client.get("/api/ontology/versions")
+        assert registered_ontologies.status_code == 200
+        assert registered_ontologies.json()[0]["version"] == "0.4.0"
+        assert registered_ontologies.json()[0]["snapshot_json"]["vocabulary_definitions"]["Bail Factors"][0]["value"] == "Ground — Primary"
+        assert client.get("/api/ontology/value-migrations").json() == []
 
         imported = client.post("/api/statutes/criminal-code/import")
         assert imported.status_code == 201, imported.text
@@ -207,3 +217,21 @@ def test_annotation_validation_and_statute_lookup(monkeypatch, tmp_path) -> None
             "function": "States Rule",
         })
         assert incomplete_bail.status_code == 422
+
+
+def test_registered_ontology_version_cannot_be_rewritten(monkeypatch, tmp_path) -> None:
+    reset_database()
+    original = (Path(__file__).parents[2] / "ONTOLOGY.md").read_text(encoding="utf-8")
+    altered = tmp_path / "ONTOLOGY.md"
+    altered.write_text(original.replace("| Bail | Judicial interim release, review, or bail pending appeal |", "| Bail | A deliberately rewritten meaning |", 1), encoding="utf-8")
+
+    with SessionLocal() as session:
+        synchronize_ontology_registry(session)
+
+    monkeypatch.setattr("app.ontology.ONTOLOGY_PATH", altered)
+    load_ontology.cache_clear()
+    with SessionLocal() as session:
+        with pytest.raises(RuntimeError, match="changed after version 0.4.0 was registered"):
+            synchronize_ontology_registry(session)
+        session.rollback()
+    load_ontology.cache_clear()

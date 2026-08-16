@@ -142,6 +142,8 @@ Changes to the ontology require:
 3. retaining the version on each annotation; and
 4. recording why a new value was introduced, particularly after repeated `Other` use.
 
+At first use of a version, Heimdall stores an immutable `ontology_version` snapshot containing the annotation-field rules, controlled values, and their meanings, with a semantic fingerprint. Startup rejects a source ontology whose fingerprint no longer matches an already registered version. `ontology_value_migration` records rename and retirement mappings from `ONTOLOGY.md`; it is explanatory and retrieval-oriented, not an automatic mutation of historic annotations. Adding a field requires a forward-only database migration plus API/UI support and an explicit decision on whether to backfill older records.
+
 ## 9. Future AI Boundary
 
 An AI provider interface is introduced only in Phase 2. It accepts curated source material and produces a separately stored `DerivedArtifact` with provenance, model identity, prompt version, and human review state. It cannot call annotation-creation or update services.

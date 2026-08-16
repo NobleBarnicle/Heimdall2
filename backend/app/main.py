@@ -18,9 +18,10 @@ from .annotation_data import matching_annotation_ids, rebuild_annotation_data, s
 from .config import BACKUPS_DIR, DOCUMENTS_DIR
 from .database import SessionLocal, create_backup, ensure_schema, get_session
 from .extraction import extract_paragraphs
-from .models import Annotation, AnnotationFacet, AnnotationParagraph, AnnotationRevision, Document, Paragraph, StatuteProvision, StatuteSnapshot
+from .models import Annotation, AnnotationFacet, AnnotationParagraph, AnnotationRevision, Document, OntologyValueMigration, OntologyVersion, Paragraph, StatuteProvision, StatuteSnapshot
 from .ontology import load_ontology, requires_commentary, validate_values
-from .schemas import AnnotationCreate, AnnotationRead, AnnotationRevisionRead, AnnotationUpdate, BackupRead, DocumentRead, ParagraphRead, StatuteComparisonRead, StatuteProvisionRead, StatuteSectionPageRead, StatuteSnapshotRead
+from .ontology_registry import synchronize_ontology_registry
+from .schemas import AnnotationCreate, AnnotationRead, AnnotationRevisionRead, AnnotationUpdate, BackupRead, DocumentRead, OntologyValueMigrationRead, OntologyVersionRead, ParagraphRead, StatuteComparisonRead, StatuteProvisionRead, StatuteSectionPageRead, StatuteSnapshotRead
 from .statutes import compare_snapshots, import_criminal_code, import_criminal_code_at, refresh_legacy_snapshot
 
 
@@ -28,6 +29,7 @@ from .statutes import compare_snapshots, import_criminal_code, import_criminal_c
 async def lifespan(_: FastAPI):
     ensure_schema()
     with SessionLocal() as session:
+        synchronize_ontology_registry(session)
         rebuild_annotation_data(session)
     yield
 
@@ -49,6 +51,30 @@ def health() -> dict[str, str]:
 @app.get("/api/ontology")
 def ontology() -> dict[str, object]:
     return load_ontology()
+
+
+@app.get("/api/ontology/versions", response_model=list[OntologyVersionRead])
+def list_ontology_versions(session: Session = Depends(get_session)) -> list[OntologyVersion]:
+    return list(session.scalars(select(OntologyVersion).order_by(OntologyVersion.recorded_at.desc())))
+
+
+@app.get("/api/ontology/versions/{version}", response_model=OntologyVersionRead)
+def get_ontology_version(version: str, session: Session = Depends(get_session)) -> OntologyVersion:
+    ontology_version = session.get(OntologyVersion, version)
+    if not ontology_version:
+        raise HTTPException(status_code=404, detail="Ontology version not found")
+    return ontology_version
+
+
+@app.get("/api/ontology/value-migrations", response_model=list[OntologyValueMigrationRead])
+def list_ontology_value_migrations(session: Session = Depends(get_session)) -> list[OntologyValueMigration]:
+    return list(
+        session.scalars(
+            select(OntologyValueMigration).order_by(
+                OntologyValueMigration.from_version, OntologyValueMigration.to_version, OntologyValueMigration.field
+            )
+        )
+    )
 
 
 @app.post("/api/documents", response_model=DocumentRead, status_code=201)

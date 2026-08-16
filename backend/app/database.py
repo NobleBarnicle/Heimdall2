@@ -59,9 +59,19 @@ def _add_annotation_indexes(connection: Connection) -> None:
     )
 
 
+def _add_ontology_registry_indexes(connection: Connection) -> None:
+    connection.execute(
+        text(
+            "CREATE INDEX IF NOT EXISTS ix_ontology_value_migrations_lookup "
+            "ON ontology_value_migrations (field, previous_value, from_version, to_version)"
+        )
+    )
+
+
 MIGRATIONS: tuple[tuple[str, Callable[[Connection], None]], ...] = (
     ("0001_legacy_columns", _add_missing_columns),
     ("0002_annotation_foundation", _add_annotation_indexes),
+    ("0003_ontology_registry", _add_ontology_registry_indexes),
 )
 
 
