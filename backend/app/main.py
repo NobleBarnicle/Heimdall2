@@ -4,7 +4,7 @@ import hashlib
 import json
 import re
 from contextlib import asynccontextmanager
-from datetime import date
+from datetime import date, datetime, timezone
 from pathlib import Path
 from uuid import uuid4
 
@@ -14,18 +14,21 @@ from fastapi.responses import FileResponse, StreamingResponse
 from sqlalchemy import delete, func, or_, select
 from sqlalchemy.orm import Session, selectinload
 
-from .config import DOCUMENTS_DIR
-from .database import ensure_schema, get_session
+from .annotation_data import matching_annotation_ids, rebuild_annotation_data, synchronize_annotation
+from .config import BACKUPS_DIR, DOCUMENTS_DIR
+from .database import SessionLocal, create_backup, ensure_schema, get_session
 from .extraction import extract_paragraphs
-from .models import Annotation, AnnotationParagraph, Document, Paragraph, StatuteProvision, StatuteSnapshot
+from .models import Annotation, AnnotationFacet, AnnotationParagraph, AnnotationRevision, Document, Paragraph, StatuteProvision, StatuteSnapshot
 from .ontology import load_ontology, requires_commentary, validate_values
-from .schemas import AnnotationCreate, AnnotationRead, DocumentRead, ParagraphRead, StatuteComparisonRead, StatuteProvisionRead, StatuteSectionPageRead, StatuteSnapshotRead
+from .schemas import AnnotationCreate, AnnotationRead, AnnotationRevisionRead, AnnotationUpdate, BackupRead, DocumentRead, ParagraphRead, StatuteComparisonRead, StatuteProvisionRead, StatuteSectionPageRead, StatuteSnapshotRead
 from .statutes import compare_snapshots, import_criminal_code, import_criminal_code_at, refresh_legacy_snapshot
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     ensure_schema()
+    with SessionLocal() as session:
+        rebuild_annotation_data(session)
     yield
 
 
@@ -254,11 +257,67 @@ def create_annotation(payload: AnnotationCreate, session: Session = Depends(get_
     session.flush()
     for paragraph_id in payload.paragraph_ids:
         session.add(AnnotationParagraph(annotation_id=annotation.id, paragraph_id=paragraph_id))
+    session.flush()
+    synchronize_annotation(session, annotation, "Created")
     session.commit()
     annotation = session.scalar(
         select(Annotation).where(Annotation.id == annotation.id).options(selectinload(Annotation.paragraph_links))
     )
     return _annotation_read(annotation)
+
+
+@app.patch("/api/annotations/{annotation_id}", response_model=AnnotationRead)
+def update_annotation(annotation_id: str, payload: AnnotationUpdate, session: Session = Depends(get_session)) -> AnnotationRead:
+    annotation = session.scalar(
+        select(Annotation).where(Annotation.id == annotation_id, Annotation.deleted_at.is_(None)).options(selectinload(Annotation.paragraph_links))
+    )
+    if not annotation:
+        raise HTTPException(status_code=404, detail="Annotation not found")
+    if annotation.document_id != payload.document_id:
+        raise HTTPException(status_code=422, detail="An annotation cannot be moved to a different judgment")
+    _validate_annotation(payload, session)
+    for field in (
+        "proposition", "decision_track", "bail_proceeding", "bail_issue", "bail_result", "bail_factors",
+        "annotation_type", "areas", "authority_weight", "function", "relationship_type", "boundary",
+        "triggers", "commentary", "related_authorities",
+    ):
+        value = getattr(payload, field)
+        if field == "proposition" and isinstance(value, str):
+            value = value.strip()
+        if field == "commentary" and isinstance(value, str):
+            value = value.strip() or None
+        setattr(annotation, field, value)
+    annotation.ontology_version = str(load_ontology()["version"])
+    session.execute(delete(AnnotationParagraph).where(AnnotationParagraph.annotation_id == annotation.id))
+    for paragraph_id in payload.paragraph_ids:
+        session.add(AnnotationParagraph(annotation_id=annotation.id, paragraph_id=paragraph_id))
+    session.flush()
+    synchronize_annotation(session, annotation, payload.change_note or "Updated")
+    session.commit()
+    annotation = session.scalar(
+        select(Annotation).where(Annotation.id == annotation.id).options(selectinload(Annotation.paragraph_links))
+    )
+    return _annotation_read(annotation)
+
+
+@app.get("/api/annotations/{annotation_id}/revisions", response_model=list[AnnotationRevisionRead])
+def list_annotation_revisions(annotation_id: str, session: Session = Depends(get_session)) -> list[AnnotationRevision]:
+    if not session.get(Annotation, annotation_id):
+        raise HTTPException(status_code=404, detail="Annotation not found")
+    return list(session.scalars(select(AnnotationRevision).where(AnnotationRevision.annotation_id == annotation_id).order_by(AnnotationRevision.revision_number.desc())))
+
+
+@app.delete("/api/annotations/{annotation_id}", status_code=204)
+def delete_annotation(annotation_id: str, session: Session = Depends(get_session)) -> None:
+    annotation = session.scalar(
+        select(Annotation).where(Annotation.id == annotation_id, Annotation.deleted_at.is_(None)).options(selectinload(Annotation.paragraph_links))
+    )
+    if not annotation:
+        raise HTTPException(status_code=404, detail="Annotation not found")
+    annotation.deleted_at = datetime.now(timezone.utc)
+    session.flush()
+    synchronize_annotation(session, annotation, "Deleted")
+    session.commit()
 
 
 @app.get("/api/annotations", response_model=list[AnnotationRead])
@@ -269,31 +328,104 @@ def search_annotations(
     bail_proceeding: str | None = Query(None),
     bail_result: str | None = Query(None),
     bail_factor: list[str] = Query(default=[]),
+    trigger: list[str] = Query(default=[]),
     session: Session = Depends(get_session),
 ) -> list[AnnotationRead]:
     statement = select(Annotation).where(Annotation.deleted_at.is_(None)).options(selectinload(Annotation.paragraph_links))
     if q:
-        term = f"%{q.strip()}%"
-        statement = statement.where(or_(Annotation.proposition.ilike(term), Annotation.commentary.ilike(term)))
+        matching_ids = matching_annotation_ids(session, q)
+        if not matching_ids:
+            return []
+        statement = statement.where(Annotation.id.in_(matching_ids))
     if annotation_type:
         statement = statement.where(Annotation.annotation_type == annotation_type)
     if bail_proceeding:
         statement = statement.where(Annotation.bail_proceeding == bail_proceeding)
     if bail_result:
         statement = statement.where(Annotation.bail_result == bail_result)
-    annotations = list(session.scalars(statement.order_by(Annotation.updated_at.desc())))
     if area:
-        annotations = [annotation for annotation in annotations if area in annotation.areas]
+        statement = statement.where(
+            Annotation.id.in_(
+                select(AnnotationFacet.annotation_id).where(AnnotationFacet.facet_type == "area", AnnotationFacet.value == area)
+            )
+        )
     if bail_factor:
-        annotations = [annotation for annotation in annotations if all(factor in (annotation.bail_factors or []) for factor in bail_factor)]
+        for factor in bail_factor:
+            statement = statement.where(
+                Annotation.id.in_(
+                    select(AnnotationFacet.annotation_id).where(
+                        AnnotationFacet.facet_type == "bail_factor", AnnotationFacet.value == factor
+                    )
+                )
+            )
+    for trigger_value in trigger:
+        statement = statement.where(
+            Annotation.id.in_(
+                select(AnnotationFacet.annotation_id).where(
+                    AnnotationFacet.facet_type == "trigger", AnnotationFacet.value == trigger_value
+                )
+            )
+        )
+    annotations = list(session.scalars(statement.order_by(Annotation.updated_at.desc())))
     return [_annotation_read(annotation) for annotation in annotations]
 
 
 @app.get("/api/exports/annotations")
 def export_annotations(session: Session = Depends(get_session)) -> StreamingResponse:
-    annotations = search_annotations(q=None, area=None, annotation_type=None, bail_proceeding=None, bail_result=None, bail_factor=[], session=session)
-    payload = json.dumps([item.model_dump(mode="json") for item in annotations], indent=2).encode("utf-8")
+    annotations = search_annotations(q=None, area=None, annotation_type=None, bail_proceeding=None, bail_result=None, bail_factor=[], trigger=[], session=session)
+    records = []
+    for annotation in annotations:
+        document = session.get(Document, annotation.document_id)
+        paragraphs = list(
+            session.scalars(
+                select(Paragraph)
+                .join(AnnotationParagraph, AnnotationParagraph.paragraph_id == Paragraph.id)
+                .where(AnnotationParagraph.annotation_id == annotation.id)
+                .order_by(Paragraph.ordinal)
+            )
+        )
+        records.append(
+            {
+                "annotation": annotation.model_dump(mode="json"),
+                "document": {
+                    "id": document.id,
+                    "title": document.title,
+                    "neutral_citation": document.neutral_citation,
+                    "court": document.court,
+                    "decision_date": document.decision_date.isoformat() if document.decision_date else None,
+                    "sha256": document.sha256,
+                } if document else None,
+                "paragraphs": [ParagraphRead.model_validate(paragraph).model_dump(mode="json") for paragraph in paragraphs],
+            }
+        )
+    payload = json.dumps(
+        {
+            "format": "heimdall-annotation-export",
+            "format_version": 1,
+            "exported_at": datetime.now(timezone.utc).isoformat(),
+            "annotations": records,
+        },
+        indent=2,
+    ).encode("utf-8")
     return StreamingResponse(iter([payload]), media_type="application/json", headers={"Content-Disposition": "attachment; filename=heimdall-annotations.json"})
+
+
+def _backup_read(path: Path) -> BackupRead:
+    return BackupRead(
+        filename=path.name,
+        bytes=path.stat().st_size,
+        created_at=datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc),
+    )
+
+
+@app.post("/api/backups", response_model=BackupRead, status_code=201)
+def create_local_backup() -> BackupRead:
+    return _backup_read(create_backup())
+
+
+@app.get("/api/backups", response_model=list[BackupRead])
+def list_local_backups() -> list[BackupRead]:
+    return [_backup_read(path) for path in sorted(BACKUPS_DIR.glob("*.sqlite3"), reverse=True)]
 
 
 @app.post("/api/statutes/criminal-code/import", response_model=StatuteSnapshotRead, status_code=201)

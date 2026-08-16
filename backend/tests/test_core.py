@@ -4,7 +4,7 @@ from datetime import date
 
 from fastapi.testclient import TestClient
 
-from app.database import Base, engine
+from app.database import Base, engine, ensure_schema
 from app.extraction import extract_paragraphs_from_pages
 from app.main import app
 from app.models import Document, Paragraph
@@ -25,7 +25,10 @@ BODY_ONLY_CODE = b"""<?xml version='1.0'?>
 
 def reset_database() -> None:
     Base.metadata.drop_all(engine)
-    Base.metadata.create_all(engine)
+    with engine.begin() as connection:
+        connection.exec_driver_sql("DROP TABLE IF EXISTS annotation_search")
+        connection.exec_driver_sql("DROP TABLE IF EXISTS schema_migrations")
+    ensure_schema()
 
 
 def test_parser_preserves_nested_citations() -> None:
@@ -157,6 +160,41 @@ def test_annotation_validation_and_statute_lookup(monkeypatch, tmp_path) -> None
         ])
         assert retrieved.status_code == 200
         assert [item["id"] for item in retrieved.json()] == [annotation.json()["id"]]
+
+        full_text = client.get("/api/annotations", params={"q": "test proposition"})
+        assert full_text.status_code == 200
+        assert [item["id"] for item in full_text.json()] == [annotation.json()["id"]]
+
+        revisions = client.get(f"/api/annotations/{annotation.json()['id']}/revisions")
+        assert revisions.status_code == 200
+        assert revisions.json()[0]["revision_number"] == 1
+        assert revisions.json()[0]["snapshot_json"]["paragraph_ids"] == [paragraph_id]
+
+        update_payload = {**annotation.json(), "proposition": "The court states a revised bail principle.", "change_note": "Clarified wording."}
+        update_payload.pop("id")
+        update_payload.pop("ontology_version")
+        update_payload.pop("created_at")
+        update_payload.pop("updated_at")
+        updated = client.patch(f"/api/annotations/{annotation.json()['id']}", json=update_payload)
+        assert updated.status_code == 200, updated.text
+        assert updated.json()["proposition"] == "The court states a revised bail principle."
+
+        revisions = client.get(f"/api/annotations/{annotation.json()['id']}/revisions")
+        assert [item["revision_number"] for item in revisions.json()] == [2, 1]
+        assert revisions.json()[0]["change_note"] == "Clarified wording."
+
+        exported = client.get("/api/exports/annotations")
+        assert exported.status_code == 200
+        export = exported.json()
+        assert export["format"] == "heimdall-annotation-export"
+        assert export["format_version"] == 1
+        assert export["annotations"][0]["document"]["title"] == "R. v. Test"
+        assert export["annotations"][0]["paragraphs"][0]["id"] == paragraph_id
+
+        backup = client.post("/api/backups")
+        assert backup.status_code == 201
+        assert backup.json()["bytes"] > 0
+        assert backup.json()["filename"].endswith(".sqlite3")
 
         incomplete_bail = client.post("/api/annotations", json={
             "document_id": document_id,

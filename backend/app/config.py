@@ -15,8 +15,10 @@ DATA_DIR = data_dir()
 DATABASE_PATH = DATA_DIR / "heimdall.sqlite3"
 DOCUMENTS_DIR = DATA_DIR / "documents"
 STATUTES_DIR = DATA_DIR / "statutes"
+EXPORTS_DIR = DATA_DIR / "exports"
+BACKUPS_DIR = DATA_DIR / "backups"
 
 
 def ensure_data_directories() -> None:
-    for directory in (DATA_DIR, DOCUMENTS_DIR, STATUTES_DIR, DATA_DIR / "exports", DATA_DIR / "backups"):
+    for directory in (DATA_DIR, DOCUMENTS_DIR, STATUTES_DIR, EXPORTS_DIR, BACKUPS_DIR):
         directory.mkdir(parents=True, exist_ok=True)

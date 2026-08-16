@@ -4,7 +4,7 @@ from datetime import date, datetime, timezone
 from typing import Optional
 from uuid import uuid4
 
-from sqlalchemy import Date, DateTime, ForeignKey, Integer, JSON, String, Text
+from sqlalchemy import Date, DateTime, ForeignKey, Integer, JSON, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .database import Base
@@ -75,6 +75,8 @@ class Annotation(Base):
 
     document: Mapped[Document] = relationship(back_populates="annotations")
     paragraph_links: Mapped[list[AnnotationParagraph]] = relationship(back_populates="annotation", cascade="all, delete-orphan")
+    revisions: Mapped[list[AnnotationRevision]] = relationship(back_populates="annotation", cascade="all, delete-orphan")
+    facets: Mapped[list[AnnotationFacet]] = relationship(back_populates="annotation", cascade="all, delete-orphan")
 
 
 class AnnotationParagraph(Base):
@@ -84,6 +86,32 @@ class AnnotationParagraph(Base):
     paragraph_id: Mapped[str] = mapped_column(ForeignKey("paragraphs.id"), primary_key=True)
     annotation: Mapped[Annotation] = relationship(back_populates="paragraph_links")
     paragraph: Mapped[Paragraph] = relationship(back_populates="annotation_links")
+
+
+class AnnotationRevision(Base):
+    __tablename__ = "annotation_revisions"
+    __table_args__ = (UniqueConstraint("annotation_id", "revision_number", name="uq_annotation_revision_number"),)
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid4()))
+    annotation_id: Mapped[str] = mapped_column(ForeignKey("annotations.id"), index=True)
+    revision_number: Mapped[int] = mapped_column(Integer)
+    snapshot_json: Mapped[dict[str, object]] = mapped_column(JSON)
+    change_note: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+    annotation: Mapped[Annotation] = relationship(back_populates="revisions")
+
+
+class AnnotationFacet(Base):
+    """Normalized, queryable values for annotations that may have more than one value."""
+
+    __tablename__ = "annotation_facets"
+
+    annotation_id: Mapped[str] = mapped_column(ForeignKey("annotations.id"), primary_key=True)
+    facet_type: Mapped[str] = mapped_column(String, primary_key=True)
+    value: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+
+    annotation: Mapped[Annotation] = relationship(back_populates="facets")
 
 
 class StatuteSnapshot(Base):

@@ -70,14 +70,14 @@ The initial statute is the Canadian *Criminal Code*, R.S.C. 1985, c. C-46. Impor
 - `relationship`, `boundary`, `trigger`, `commentary`
 - `ontology_version`, `created_at`, `updated_at`, `deleted_at`
 
-An annotation is linked to one or more paragraphs through `annotation_paragraph`. It may link related authorities through `annotation_related_authority`. The exact controlled values and validation rules come only from `ONTOLOGY.md`.
+An annotation is linked to one or more paragraphs through `annotation_paragraph`. Multi-value classifications (`areas`, `triggers`, and `bail_factors`) are also mirrored into normalized `annotation_facet` records for indexed structured search; their JSON fields remain the canonical user-facing shape. It may link related authorities through `annotation_related_authority`. The exact controlled values and validation rules come only from `ONTOLOGY.md`.
 
 ### Annotation revision
 
 - `id`, `annotation_id`, `revision_number`, `snapshot_json`
 - `changed_at`, `change_note`
 
-Save a revision before each user-visible canonical change. Never rewrite revision history.
+Save a revision at creation and before each user-visible canonical change, including soft deletion. Never rewrite revision history.
 
 ## 5. Storage
 
@@ -94,7 +94,7 @@ application-data/
 └── backups/
 ```
 
-Database migrations are versioned and forward-only. A backup is taken before a migration that changes canonical data.
+Database migrations are recorded, versioned, and forward-only. A consistent SQLite backup is taken before migrations on an existing database; users can also make an on-demand backup from the app. Full-text indexes are derived, rebuildable SQLite FTS5 data and never replace canonical annotation records.
 
 ## 6. API Shape (Phase 1)
 
@@ -111,7 +111,9 @@ Database migrations are versioned and forward-only. A backup is taken before a m
 - `GET /annotations/{id}` — read an annotation and provenance
 - `PATCH /annotations/{id}` — update and create a revision
 - `DELETE /annotations/{id}` — soft-delete an annotation
+- `GET /annotations/{id}/revisions` — read immutable annotation history
 - `GET /exports/annotations` — export selected canonical annotations
+- `GET /backups`, `POST /backups` — inspect or create local SQLite backups
 - `GET /ontology` — expose the parsed, versioned controlled vocabulary
 
 The API returns predictable error objects and validates every controlled field against the current ontology. It records the ontology version at annotation creation and update.

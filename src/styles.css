@@ -101,7 +101,9 @@
 .muted { color: #7a8588; font-size: 13px; padding: 0 15px; }
 .empty-state { padding: 24px 15px; }
 .annotation-search { margin-top: 18px; padding-bottom: 4px; }
+.annotation-actions { display: flex; align-items: center; gap: 8px; }
 .annotation-search .panel-heading input { width: 260px; font-size: 12px; }
+.annotation-actions button, .annotation-actions a { border: 1px solid #8aa19a; border-radius: 4px; background: white; color: #285955; font-size: 12px; font-weight: 600; padding: 7px 9px; text-decoration: none; }
 .annotation-search article { margin: 0 16px; padding: 12px 0; border-top: 1px solid #eceae4; }
 .annotation-search article p { margin-bottom: 5px; font-family: Georgia, serif; }
 .annotation-search article small { color: #607173; font-size: 11px; }

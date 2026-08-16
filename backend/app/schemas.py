@@ -58,6 +58,26 @@ class AnnotationRead(AnnotationCreate):
     updated_at: datetime
 
 
+class AnnotationUpdate(AnnotationCreate):
+    change_note: str | None = Field(default=None, max_length=1000)
+
+
+class AnnotationRevisionRead(BaseModel):
+    id: str
+    revision_number: int
+    snapshot_json: dict[str, object]
+    change_note: str | None
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class BackupRead(BaseModel):
+    filename: str
+    bytes: int
+    created_at: datetime
+
+
 class StatuteSnapshotRead(BaseModel):
     id: str
     short_title: str

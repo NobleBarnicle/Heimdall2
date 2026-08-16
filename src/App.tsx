@@ -56,6 +56,13 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    const timer = window.setTimeout(() => {
+      api.annotations(search).then(setAnnotations).catch((error: Error) => setMessage(error.message));
+    }, 150);
+    return () => window.clearTimeout(timer);
+  }, [search]);
+
+  useEffect(() => {
     if (!selectedDocument) { setParagraphs([]); return; }
     api.paragraphs(selectedDocument.id).then((next) => {
       setParagraphs(next); setSelectedParagraphs([]); setDraft(emptyDraft(selectedDocument.id));
@@ -130,6 +137,15 @@ export default function App() {
     try {
       const nextParagraphs = await api.reextractParagraphs(selectedDocument.id);
       setParagraphs(nextParagraphs); setSelectedParagraphs([]); setMessage("Extracted text refreshed from the original PDF.");
+    } catch (error) { setMessage((error as Error).message); }
+    finally { setBusy(false); }
+  }
+
+  async function createBackup() {
+    setBusy(true); setMessage("Creating a consistent local database backup…");
+    try {
+      const backup = await api.createBackup();
+      setMessage(`Local backup created: ${backup.filename}`);
     } catch (error) { setMessage((error as Error).message); }
     finally { setBusy(false); }
   }
@@ -270,8 +286,10 @@ export default function App() {
         <section className="annotation-search">
 <div className="panel-heading">
 <h2>Saved propositions</h2>
-<input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Filter this session" />
-</div>{annotations.filter((annotation) => `${annotation.proposition} ${annotation.commentary ?? ""}`.toLowerCase().includes(search.toLowerCase())).slice(0, 12).map((annotation) => <article key={annotation.id}>
+<div className="annotation-actions"><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search annotations and source text" />
+<button disabled={busy} onClick={() => void createBackup()}>Back up</button>
+<a href="/api/exports/annotations">Export</a></div>
+</div>{annotations.slice(0, 12).map((annotation) => <article key={annotation.id}>
 <p>{annotation.proposition}</p>
 <small>{annotation.decision_track || "Legacy annotation"}{annotation.bail_issue ? ` · ${annotation.bail_issue}` : ""} · {annotation.annotation_type} · {annotation.authority_weight}</small>{annotation.bail_factors.length > 0 && <small>{annotation.bail_factors.join(" · ")}</small>}
 </article>)}</section>
