@@ -71,10 +71,22 @@
 .decision-track > div { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
 .decision-track button { border: 1px solid #ccd7d2; border-radius: 999px; background: white; color: #415457; font-size: 11px; padding: 6px 8px; }
 .decision-track button:hover, .decision-track button.active { border-color: #39726c; background: #eaf4ef; color: #174e4c; }
-.bail-case-context { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; margin: 10px 15px 12px; }
-.bail-case-context p { grid-column: 1 / -1; margin: 0; color: #536063; font-size: 11px; font-weight: 700; }
+.bail-case-context { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; margin: 10px 15px 12px; padding: 13px; border: 1px solid #d8d5c9; border-radius: 7px; background: #fcfaf4; }
+.bail-case-context > div:first-child { grid-column: 1 / -1; display: grid; gap: 3px; }
+.bail-case-context strong { color: #514631; font-family: Georgia, serif; font-size: 16px; font-weight: 500; }
+.bail-case-context span { color: #6f756e; font-size: 11px; }
 .bail-case-context label { display: grid; gap: 5px; color: #536063; font-size: 11px; font-weight: 700; }
 .bail-case-context select { min-width: 0; font-size: 12px; }
+.bail-case-context .bail-factors, .bail-case-context .case-note { grid-column: 1 / -1; }
+.bail-case-context .case-note textarea { min-height: 54px; font-size: 12px; resize: vertical; }
+.case-context-actions { grid-column: 1 / -1; display: flex; gap: 8px; }
+.case-context-actions button, .case-context-summary button { border: 1px solid #8aa19a; border-radius: 4px; background: white; color: #285955; font-size: 11px; font-weight: 600; padding: 7px 9px; }
+.case-context-actions button:first-child { border-color: #244f51; background: #1d4c4e; color: white; }
+.case-context-summary { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 10px 15px 12px; padding: 10px 13px; border: 1px solid #dbe5df; border-radius: 7px; background: #f5f9f6; }
+.case-context-summary div { display: grid; gap: 2px; }
+.case-context-summary span { color: #657672; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; }
+.case-context-summary strong { color: #244f4d; font-family: Georgia, serif; font-size: 14px; font-weight: 500; }
+.case-context-summary small { color: #657672; font-size: 10px; }
 .proposition-card { margin: 0 15px 12px; padding: 13px; border: 1px solid #cddfd6; border-radius: 7px; background: #f2f8f4; }
 .proposition-card > div { display: grid; gap: 2px; margin-bottom: 11px; }
 .proposition-card strong { color: #244f4d; font-family: Georgia, serif; font-size: 16px; font-weight: 500; }
@@ -88,14 +100,6 @@
 .bail-factors > div { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 6px; }
 .bail-factors button { border: 1px solid #c9d8d1; border-radius: 999px; background: #fff; color: #49605d; font-size: 10px; line-height: 1.2; padding: 5px 7px; text-align: left; }
 .bail-factors button:hover, .bail-factors button.active { border-color: #39726c; background: #dcefe5; color: #174e4c; }
-.annotation-more { margin: 3px 15px 12px; border-top: 1px solid #e5e4df; }
-.annotation-more summary { cursor: pointer; display: flex; justify-content: space-between; padding: 11px 0; color: #536063; font-size: 11px; font-weight: 700; }
-.annotation-more summary span { color: #84908f; font-weight: 500; }
-.annotation-more .field-grid { margin: 0 -15px; }
-.annotation-more > label { display: grid; gap: 5px; color: #536063; font-size: 11px; font-weight: 700; }
-.field-grid { display: grid; grid-template-columns: 1fr 1fr; }
-.field-grid label { padding-bottom: 10px; }
-.field-grid select { min-width: 0; font-size: 12px; }
 .annotation-panel .primary { margin: 4px 15px; width: calc(100% - 30px); display: flex; justify-content: space-between; }
 .primary kbd { font-size: 11px; color: #cde0db; }
 .muted { color: #7a8588; font-size: 13px; padding: 0 15px; }
@@ -103,6 +107,7 @@
 .annotation-search { margin-top: 18px; padding-bottom: 4px; }
 .annotation-actions { display: flex; align-items: center; gap: 8px; }
 .annotation-search .panel-heading input { width: 260px; font-size: 12px; }
+.annotation-search .panel-heading select { max-width: 150px; font-size: 11px; }
 .annotation-actions button, .annotation-actions a { border: 1px solid #8aa19a; border-radius: 4px; background: white; color: #285955; font-size: 12px; font-weight: 600; padding: 7px 9px; text-decoration: none; }
 .annotation-search article { margin: 0 16px; padding: 12px 0; border-top: 1px solid #eceae4; }
 .annotation-search article p { margin-bottom: 5px; font-family: Georgia, serif; }

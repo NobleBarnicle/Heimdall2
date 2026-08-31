@@ -24,9 +24,22 @@ class DocumentRead(BaseModel):
     decision_date: date | None
     source_filename: str
     extraction_status: str
+    bail_proceeding: str | None
+    bail_result: str | None
+    bail_grounds: list[str]
+    bail_case_material: list[str]
+    bail_case_note: str | None
     created_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+class DocumentCaseContextUpdate(BaseModel):
+    bail_proceeding: str = Field(min_length=1)
+    bail_result: str = Field(min_length=1)
+    bail_grounds: list[str] = Field(default_factory=list)
+    bail_case_material: list[str] = Field(default_factory=list)
+    bail_case_note: str | None = Field(default=None, max_length=2000)
 
 
 class AnnotationCreate(BaseModel):
@@ -39,7 +52,6 @@ class AnnotationCreate(BaseModel):
     bail_proceeding: str | None = None
     bail_issue: str | None = None
     bail_result: str | None = None
-    bail_factors: list[str] = Field(default_factory=list)
     annotation_type: str
     areas: list[str] = Field(min_length=1)
     authority_weight: str

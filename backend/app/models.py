@@ -26,11 +26,20 @@ class Document(Base):
     stored_path: Mapped[str] = mapped_column(String, unique=True)
     sha256: Mapped[str] = mapped_column(String, index=True)
     extraction_status: Mapped[str] = mapped_column(String, default="pending")
+    # Case-level Bail context.  Bail annotations inherit these values when saved.
+    bail_proceeding: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    bail_result: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    # Case-level Bail profile. Grounds describe legal scope; material describes
+    # facts and context present in the case.
+    bail_grounds: Mapped[Optional[list[str]]] = mapped_column(JSON, nullable=True, default=list)
+    bail_case_material: Mapped[Optional[list[str]]] = mapped_column(JSON, nullable=True, default=list)
+    bail_case_note: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
 
     paragraphs: Mapped[list[Paragraph]] = relationship(back_populates="document", cascade="all, delete-orphan")
     annotations: Mapped[list[Annotation]] = relationship(back_populates="document", cascade="all, delete-orphan")
+    facets: Mapped[list[DocumentFacet]] = relationship(back_populates="document", cascade="all, delete-orphan")
 
 
 class Paragraph(Base):
@@ -112,6 +121,18 @@ class AnnotationFacet(Base):
     value: Mapped[str] = mapped_column(String, primary_key=True, index=True)
 
     annotation: Mapped[Annotation] = relationship(back_populates="facets")
+
+
+class DocumentFacet(Base):
+    """Normalized, queryable case-level Bail profile values."""
+
+    __tablename__ = "document_facets"
+
+    document_id: Mapped[str] = mapped_column(ForeignKey("documents.id"), primary_key=True)
+    facet_type: Mapped[str] = mapped_column(String, primary_key=True)
+    value: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+
+    document: Mapped[Document] = relationship(back_populates="facets")
 
 
 class OntologyVersion(Base):

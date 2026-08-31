@@ -9,9 +9,10 @@ from pathlib import Path
 
 ONTOLOGY_PATH = Path(__file__).resolve().parents[2] / "ONTOLOGY.md"
 VOCABULARY_FIELDS = (
-    "Research Track", "Bail Proceeding", "Bail Issue", "Bail Result", "Bail Factors",
+    "Research Track", "Bail Proceeding", "Bail Issue", "Bail Result", "Bail Grounds", "Bail Case Material",
     "Type", "Area", "Authority Weight", "Function", "Relationship", "Boundary", "Trigger",
 )
+HISTORICAL_VOCABULARY_FIELDS = {"Bail Factors"}
 
 
 def _section_table_rows(markdown: str, section_name: str) -> list[list[str]]:
@@ -70,7 +71,7 @@ def load_ontology() -> dict[str, object]:
         from_version, to_version, field, previous_value, replacement_value, reason = row
         if not all([from_version, to_version, field, previous_value, reason]):
             raise RuntimeError("Value Migrations requires versions, field, previous value, and reason")
-        if field not in VOCABULARY_FIELDS:
+        if field not in {*VOCABULARY_FIELDS, *HISTORICAL_VOCABULARY_FIELDS}:
             raise RuntimeError(f"Value Migrations uses unknown field: {field}")
         value_migrations.append(
             {

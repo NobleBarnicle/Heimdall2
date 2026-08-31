@@ -21,6 +21,10 @@ def annotation_snapshot(annotation: Annotation) -> dict[str, object]:
     return {
         "annotation_id": annotation.id,
         "document_id": annotation.document_id,
+        "case_context": {
+            "bail_proceeding": annotation.bail_proceeding,
+            "bail_result": annotation.bail_result,
+        },
         "paragraph_ids": [link.paragraph_id for link in annotation.paragraph_links],
         "proposition": annotation.proposition,
         "decision_track": annotation.decision_track,

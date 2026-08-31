@@ -15,13 +15,14 @@ from sqlalchemy import delete, func, or_, select
 from sqlalchemy.orm import Session, selectinload
 
 from .annotation_data import matching_annotation_ids, rebuild_annotation_data, synchronize_annotation
+from .document_data import rebuild_document_facets, synchronize_document_facets
 from .config import BACKUPS_DIR, DOCUMENTS_DIR
 from .database import SessionLocal, create_backup, ensure_schema, get_session
 from .extraction import extract_paragraphs
-from .models import Annotation, AnnotationFacet, AnnotationParagraph, AnnotationRevision, Document, OntologyValueMigration, OntologyVersion, Paragraph, StatuteProvision, StatuteSnapshot
+from .models import Annotation, AnnotationFacet, AnnotationParagraph, AnnotationRevision, Document, DocumentFacet, OntologyValueMigration, OntologyVersion, Paragraph, StatuteProvision, StatuteSnapshot
 from .ontology import load_ontology, requires_commentary, validate_values
 from .ontology_registry import synchronize_ontology_registry
-from .schemas import AnnotationCreate, AnnotationRead, AnnotationRevisionRead, AnnotationUpdate, BackupRead, DocumentRead, OntologyValueMigrationRead, OntologyVersionRead, ParagraphRead, StatuteComparisonRead, StatuteProvisionRead, StatuteSectionPageRead, StatuteSnapshotRead
+from .schemas import AnnotationCreate, AnnotationRead, AnnotationRevisionRead, AnnotationUpdate, BackupRead, DocumentCaseContextUpdate, DocumentRead, OntologyValueMigrationRead, OntologyVersionRead, ParagraphRead, StatuteComparisonRead, StatuteProvisionRead, StatuteSectionPageRead, StatuteSnapshotRead
 from .statutes import compare_snapshots, import_criminal_code, import_criminal_code_at, refresh_legacy_snapshot
 
 
@@ -31,6 +32,7 @@ async def lifespan(_: FastAPI):
     with SessionLocal() as session:
         synchronize_ontology_registry(session)
         rebuild_annotation_data(session)
+        rebuild_document_facets(session)
     yield
 
 
@@ -137,6 +139,47 @@ def get_document(document_id: str, session: Session = Depends(get_session)) -> D
     return document
 
 
+@app.patch("/api/documents/{document_id}/case-context", response_model=DocumentRead)
+def update_document_case_context(
+    document_id: str,
+    payload: DocumentCaseContextUpdate,
+    session: Session = Depends(get_session),
+) -> Document:
+    """Save the shared Bail profile and keep inherited annotation context aligned."""
+    document = session.get(Document, document_id)
+    if not document:
+        raise HTTPException(status_code=404, detail="Document not found")
+    try:
+        validate_values("Bail Proceeding", [payload.bail_proceeding])
+        validate_values("Bail Result", [payload.bail_result])
+        validate_values("Bail Grounds", payload.bail_grounds)
+        validate_values("Bail Case Material", payload.bail_case_material)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    document.bail_proceeding = payload.bail_proceeding
+    document.bail_result = payload.bail_result
+    document.bail_grounds = list(dict.fromkeys(payload.bail_grounds))
+    document.bail_case_material = list(dict.fromkeys(payload.bail_case_material))
+    document.bail_case_note = payload.bail_case_note.strip() if payload.bail_case_note else None
+    if "Other" in document.bail_case_material and not document.bail_case_note:
+        raise HTTPException(status_code=422, detail="Case note is required when using Other case-specific material")
+    synchronize_document_facets(session, document)
+    existing_annotations = list(
+        session.scalars(
+            select(Annotation)
+            .where(Annotation.document_id == document.id, Annotation.decision_track == "Bail", Annotation.deleted_at.is_(None))
+            .options(selectinload(Annotation.paragraph_links))
+        )
+    )
+    for annotation in existing_annotations:
+        annotation.bail_proceeding = payload.bail_proceeding
+        annotation.bail_result = payload.bail_result
+        synchronize_annotation(session, annotation, "Updated inherited case context")
+    session.commit()
+    session.refresh(document)
+    return document
+
+
 @app.get("/api/documents/{document_id}/file")
 def document_file(document_id: str, session: Session = Depends(get_session)) -> FileResponse:
     document = session.get(Document, document_id)
@@ -186,7 +229,7 @@ def reextract_paragraphs(document_id: str, session: Session = Depends(get_sessio
     return list(session.scalars(select(Paragraph).where(Paragraph.document_id == document_id).order_by(Paragraph.ordinal)))
 
 
-def _validate_annotation(payload: AnnotationCreate, session: Session) -> None:
+def _validate_annotation(payload: AnnotationCreate, session: Session, document: Document) -> None:
     if not payload.decision_track:
         raise HTTPException(status_code=422, detail="Choose a research track")
     try:
@@ -201,19 +244,25 @@ def _validate_annotation(payload: AnnotationCreate, session: Session) -> None:
             validate_values("Boundary", [payload.boundary])
         validate_values("Trigger", payload.triggers)
         if payload.decision_track == "Bail":
-            if not all([payload.bail_proceeding, payload.bail_issue, payload.bail_result]):
-                raise ValueError("Bail annotations require a proceeding, main issue, and result")
-            validate_values("Bail Proceeding", [payload.bail_proceeding])
+            if not all([document.bail_proceeding, document.bail_result]):
+                raise ValueError("Set the Bail case context (proceeding and result) before saving Bail annotations")
+            if not payload.bail_issue:
+                raise ValueError("Bail annotations require a main issue")
+            if payload.bail_proceeding and payload.bail_proceeding != document.bail_proceeding:
+                raise ValueError("Bail proceeding must match the saved case context")
+            if payload.bail_result and payload.bail_result != document.bail_result:
+                raise ValueError("Bail result must match the saved case context")
+            validate_values("Bail Proceeding", [document.bail_proceeding])
             validate_values("Bail Issue", [payload.bail_issue])
-            validate_values("Bail Result", [payload.bail_result])
-            validate_values("Bail Factors", payload.bail_factors)
-        elif any([payload.bail_proceeding, payload.bail_issue, payload.bail_result, *payload.bail_factors]):
+            validate_values("Bail Result", [document.bail_result])
+        elif any([payload.bail_proceeding, payload.bail_issue, payload.bail_result]):
             raise ValueError("Bail details can only be used with the Bail research track")
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     all_values = [payload.decision_track, payload.annotation_type, *payload.areas, payload.authority_weight, payload.function, *payload.triggers]
     all_values.extend(value for value in [payload.bail_proceeding, payload.bail_issue, payload.bail_result] if value)
-    all_values.extend(payload.bail_factors)
+    if payload.decision_track == "Bail":
+        all_values.extend([document.bail_proceeding, document.bail_result])
     if payload.relationship_type:
         all_values.append(payload.relationship_type)
     if payload.boundary:
@@ -239,7 +288,6 @@ def _annotation_read(annotation: Annotation) -> AnnotationRead:
         bail_proceeding=annotation.bail_proceeding,
         bail_issue=annotation.bail_issue,
         bail_result=annotation.bail_result,
-        bail_factors=annotation.bail_factors or [],
         annotation_type=annotation.annotation_type,
         areas=annotation.areas,
         authority_weight=annotation.authority_weight,
@@ -255,19 +303,33 @@ def _annotation_read(annotation: Annotation) -> AnnotationRead:
     )
 
 
+def _add_ground_from_bail_issue(session: Session, document: Document, bail_issue: str | None) -> None:
+    """A saved ground proposition is conclusive evidence that the ground is in issue."""
+    if bail_issue not in {"Primary ground", "Secondary ground", "Tertiary ground"}:
+        return
+    grounds = document.bail_grounds or []
+    if bail_issue not in grounds:
+        document.bail_grounds = [*grounds, bail_issue]
+        synchronize_document_facets(session, document)
+
+
 @app.post("/api/annotations", response_model=AnnotationRead, status_code=201)
 def create_annotation(payload: AnnotationCreate, session: Session = Depends(get_session)) -> AnnotationRead:
-    if not session.get(Document, payload.document_id):
+    document = session.get(Document, payload.document_id)
+    if not document:
         raise HTTPException(status_code=404, detail="Document not found")
-    _validate_annotation(payload, session)
+    _validate_annotation(payload, session, document)
+    if payload.decision_track == "Bail":
+        _add_ground_from_bail_issue(session, document, payload.bail_issue)
     annotation = Annotation(
         document_id=payload.document_id,
         proposition=payload.proposition.strip(),
         decision_track=payload.decision_track,
-        bail_proceeding=payload.bail_proceeding,
+        bail_proceeding=document.bail_proceeding if payload.decision_track == "Bail" else None,
         bail_issue=payload.bail_issue,
-        bail_result=payload.bail_result,
-        bail_factors=payload.bail_factors,
+        bail_result=document.bail_result if payload.decision_track == "Bail" else None,
+        # Retained as an empty legacy column so historic annotations remain readable.
+        bail_factors=[],
         annotation_type=payload.annotation_type,
         areas=payload.areas,
         authority_weight=payload.authority_weight,
@@ -301,19 +363,28 @@ def update_annotation(annotation_id: str, payload: AnnotationUpdate, session: Se
         raise HTTPException(status_code=404, detail="Annotation not found")
     if annotation.document_id != payload.document_id:
         raise HTTPException(status_code=422, detail="An annotation cannot be moved to a different judgment")
-    _validate_annotation(payload, session)
+    document = session.get(Document, payload.document_id)
+    if not document:
+        raise HTTPException(status_code=404, detail="Document not found")
+    _validate_annotation(payload, session, document)
     for field in (
-        "proposition", "decision_track", "bail_proceeding", "bail_issue", "bail_result", "bail_factors",
+        "proposition", "decision_track", "bail_proceeding", "bail_issue", "bail_result",
         "annotation_type", "areas", "authority_weight", "function", "relationship_type", "boundary",
         "triggers", "commentary", "related_authorities",
     ):
         value = getattr(payload, field)
+        if field == "bail_proceeding" and payload.decision_track == "Bail":
+            value = document.bail_proceeding
+        if field == "bail_result" and payload.decision_track == "Bail":
+            value = document.bail_result
         if field == "proposition" and isinstance(value, str):
             value = value.strip()
         if field == "commentary" and isinstance(value, str):
             value = value.strip() or None
         setattr(annotation, field, value)
     annotation.ontology_version = str(load_ontology()["version"])
+    if payload.decision_track == "Bail":
+        _add_ground_from_bail_issue(session, document, payload.bail_issue)
     session.execute(delete(AnnotationParagraph).where(AnnotationParagraph.annotation_id == annotation.id))
     for paragraph_id in payload.paragraph_ids:
         session.add(AnnotationParagraph(annotation_id=annotation.id, paragraph_id=paragraph_id))
@@ -353,7 +424,8 @@ def search_annotations(
     annotation_type: str | None = Query(None),
     bail_proceeding: str | None = Query(None),
     bail_result: str | None = Query(None),
-    bail_factor: list[str] = Query(default=[]),
+    bail_ground: list[str] = Query(default=[]),
+    bail_case_material: list[str] = Query(default=[]),
     trigger: list[str] = Query(default=[]),
     session: Session = Depends(get_session),
 ) -> list[AnnotationRead]:
@@ -375,15 +447,20 @@ def search_annotations(
                 select(AnnotationFacet.annotation_id).where(AnnotationFacet.facet_type == "area", AnnotationFacet.value == area)
             )
         )
-    if bail_factor:
-        for factor in bail_factor:
-            statement = statement.where(
-                Annotation.id.in_(
-                    select(AnnotationFacet.annotation_id).where(
-                        AnnotationFacet.facet_type == "bail_factor", AnnotationFacet.value == factor
-                    )
+    for ground in bail_ground:
+        statement = statement.where(
+            Annotation.document_id.in_(
+                select(DocumentFacet.document_id).where(DocumentFacet.facet_type == "bail_ground", DocumentFacet.value == ground)
+            )
+        )
+    for material in bail_case_material:
+        statement = statement.where(
+            Annotation.document_id.in_(
+                select(DocumentFacet.document_id).where(
+                    DocumentFacet.facet_type == "bail_case_material", DocumentFacet.value == material
                 )
             )
+        )
     for trigger_value in trigger:
         statement = statement.where(
             Annotation.id.in_(
@@ -398,7 +475,7 @@ def search_annotations(
 
 @app.get("/api/exports/annotations")
 def export_annotations(session: Session = Depends(get_session)) -> StreamingResponse:
-    annotations = search_annotations(q=None, area=None, annotation_type=None, bail_proceeding=None, bail_result=None, bail_factor=[], trigger=[], session=session)
+    annotations = search_annotations(q=None, area=None, annotation_type=None, bail_proceeding=None, bail_result=None, bail_ground=[], bail_case_material=[], trigger=[], session=session)
     records = []
     for annotation in annotations:
         document = session.get(Document, annotation.document_id)
@@ -420,6 +497,11 @@ def export_annotations(session: Session = Depends(get_session)) -> StreamingResp
                     "court": document.court,
                     "decision_date": document.decision_date.isoformat() if document.decision_date else None,
                     "sha256": document.sha256,
+                    "bail_proceeding": document.bail_proceeding,
+                    "bail_result": document.bail_result,
+                    "bail_grounds": document.bail_grounds or [],
+                    "bail_case_material": document.bail_case_material or [],
+                    "bail_case_note": document.bail_case_note,
                 } if document else None,
                 "paragraphs": [ParagraphRead.model_validate(paragraph).model_dump(mode="json") for paragraph in paragraphs],
             }

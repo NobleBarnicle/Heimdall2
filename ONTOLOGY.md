@@ -1,6 +1,6 @@
 # Heimdall Ontology
 
-**Version:** 0.4.0
+**Version:** 0.7.0
 **Status:** Active initial vocabulary
 **Last updated:** 2026-07-30
 
@@ -15,10 +15,12 @@ The ontology is deliberately small. Add a value only after observed use demonstr
 | Case | Yes | One | A saved document authority |
 | Paragraphs | Yes | One or more | Exact saved paragraphs from the selected case |
 | Research Track | Yes | One | Select from **Research Track** before adding legal detail |
-| Bail Proceeding | Conditional | One | Required when Research Track is `Bail`; records case context |
+| Bail Proceeding | Conditional | One | Required once to establish a Bail case profile; inherited by Bail annotations |
 | Bail Issue | Conditional | One | Required when Research Track is `Bail`; identifies the highlighted proposition's point of law |
-| Bail Result | Conditional | One | Required when Research Track is `Bail`; records case context |
-| Bail Factors | Conditional | Zero or more | Optional retrieval tags for legally salient facts or grounds in the highlighted passage |
+| Bail Result | Conditional | One | Required once to establish a Bail case profile; inherited by Bail annotations |
+| Bail Grounds | Conditional | Zero or more | Case-level detention grounds actually in issue; a saved ground proposition adds its ground automatically |
+| Bail Case Material | Conditional | Zero or more | Case-level facts and context present in the decision |
+| Bail Case Note | Conditional | One | Free text about the case profile; required when Bail Case Material includes `Other` |
 | Type | Yes | One | Select from **Type** |
 | Area | Yes | One or more | Select from **Area** |
 | Authority Weight | Yes | One | Select from **Authority Weight** |
@@ -33,7 +35,9 @@ The ontology is deliberately small. Add a value only after observed use demonstr
 
 ## Research Track
 
-Research Track is the fast first classification. It determines which compact, purpose-built annotation form is shown. It classifies the legal proposition's home in the knowledge base, not the case as a whole. The general legal-context fields remain available as optional additional context.
+Research Track is the fast first classification. It determines which compact, purpose-built annotation form is shown. It classifies the legal proposition's home in the knowledge base, not the case as a whole.
+
+For a Bail case, record the Bail Proceeding, Bail Result, Grounds in Issue, and Case-specific Material once on the case before adding propositions. Grounds and material are case-level retrieval data; each saved Bail annotation retains the inherited proceeding and result snapshot.
 
 | Value | Meaning |
 | --- | --- |
@@ -58,13 +62,14 @@ Research Track is the fast first classification. It determines which compact, pu
 
 | Value | Meaning |
 | --- | --- |
-| Onus | Burden or reverse-onus question |
-| Detention ground | Primary, secondary, or tertiary ground |
+| Primary ground | Primary-ground detention is the proposition's main point of law |
+| Secondary ground | Secondary-ground detention is the proposition's main point of law |
+| Tertiary ground | Tertiary-ground detention is the proposition's main point of law |
+| Reverse onus | A reverse-onus question is the proposition's main point of law |
 | Release form or surety | Form of release, surety, or supervision |
-| Condition | A proposed, challenged, or varied condition |
+| Conditions | Proposed, challenged, imposed, or varied release conditions |
 | Delay | Delay affecting release or review |
 | Evidence or procedure | Evidentiary or procedural issue in the bail process |
-| Reasons | Sufficiency or adequacy of reasons |
 | Other | Another principal bail issue |
 
 ## Bail Result
@@ -82,24 +87,31 @@ Research Track is the fast first classification. It determines which compact, pu
 | Procedural disposition | Determined without a substantive release/detention outcome |
 | Other | Another result not represented above |
 
-## Bail Factors
+## Bail Grounds
 
-Use these optional tags only for a legally salient factor actually addressed by the selected passage. They are retrieval aids, not a substitute for the proposition or for careful reading of the decision.
+Use these optional case-level tags to identify the detention grounds actually in issue in the decision. This is distinct from Bail Issue, which identifies the central point of law in one highlighted passage.
 
 | Value | Meaning |
 | --- | --- |
-| Ground — Primary | The primary ground is in issue or addressed |
-| Ground — Secondary | The secondary ground is in issue or addressed |
-| Ground — Tertiary | The tertiary ground is in issue or addressed |
-| Indigenous accused / Gladue | Indigenous background, Gladue principles, or related systemic factors are addressed |
-| Intimate partner violence | Intimate partner violence or related complainant-safety context is addressed |
-| Prior non-compliance | Prior breaches, failures to attend, or non-compliance with release terms are addressed |
-| Surety or release plan | A surety, supervision, deposit, or proposed release plan is addressed |
+| Primary ground | The primary ground is in issue in the decision |
+| Secondary ground | The secondary ground is in issue in the decision |
+| Tertiary ground | The tertiary ground is in issue in the decision |
+
+## Bail Case Material
+
+Use these optional case-level tags for facts and context present in the decision. They do not assert that every highlighted passage addresses the material.
+
+| Value | Meaning |
+| --- | --- |
+| Indigenous accused / Gladue | Indigenous background, Gladue principles, or related systemic factors are present |
+| Intimate partner violence | Intimate partner violence or related complainant-safety context is present |
+| Prior non-compliance | Prior breaches, failures to attend, or non-compliance with release terms are present |
+| Surety or release plan | A surety, supervision, deposit, or proposed release plan is present |
 | Delay | Delay is material to the release, review, or result |
-| Substance use | Alcohol or drug use is materially addressed |
-| Mental health | Mental health is materially addressed |
-| Caregiving responsibilities | Children, dependants, or caregiving responsibilities are materially addressed |
-| Other | Another recurring bail factor not represented above |
+| Substance use | Alcohol or drug use is materially present |
+| Mental health | Mental health is materially present |
+| Caregiving responsibilities | Children, dependants, or caregiving responsibilities are present |
+| Other | Another recurring case-specific material category not represented above |
 
 ## Type
 
@@ -221,6 +233,9 @@ Trigger captures a factual or procedural feature that should prompt retrieval of
 | --- | --- |
 | 0.3.0 | `Decision Track` renamed to `Research Track` to make the proposition—not the case—the unit of classification. Added appeal/review result values for Bail. |
 | 0.4.0 | Added proposition-level `Bail Factors`. Replaced combined Bail result labels with explicit release, review, and appeal outcomes. Existing annotations retain their stored ontology version and historic result values. |
+| 0.5.0 | Moved Bail Proceeding and Bail Result to case context. Bail annotations inherit and retain those values, while proposition-level Bail Issue and Bail Factors remain annotation fields. |
+| 0.6.0 | Replaced generic Bail Issue labels with specific detention grounds, Reverse onus, and Conditions. Moved Bail Factors to the case profile, split into Grounds in Issue and Case-specific Material; passage-level ground annotations add their ground to the case profile automatically. |
+| 0.7.0 | Clarified that case-specific material records what is present in the case, not what every saved passage addresses. |
 
 ## Value Migrations
 
@@ -228,3 +243,10 @@ When a controlled value is renamed or retired, add one row for each old value. T
 
 | From version | To version | Field | Previous value | Replacement value | Reason |
 | --- | --- | --- | --- | --- | --- |
+| 0.5.0 | 0.6.0 | Bail Issue | Onus | Reverse onus | The meaningful distinction is whether a reverse onus applies. |
+| 0.5.0 | 0.6.0 | Bail Issue | Detention ground | — | Retired because the former value did not identify which ground was in issue. |
+| 0.5.0 | 0.6.0 | Bail Issue | Condition | Conditions | Pluralized to reflect the scope of the issue. |
+| 0.5.0 | 0.6.0 | Bail Issue | Reasons | — | Retired; the decision itself supplies reasons and unusual procedural concerns can use Evidence or procedure or Other. |
+| 0.5.0 | 0.6.0 | Bail Factors | Ground — Primary | — | Retired from passage-level factors; current case profiles use Bail Grounds. |
+| 0.5.0 | 0.6.0 | Bail Factors | Ground — Secondary | — | Retired from passage-level factors; current case profiles use Bail Grounds. |
+| 0.5.0 | 0.6.0 | Bail Factors | Ground — Tertiary | — | Retired from passage-level factors; current case profiles use Bail Grounds. |

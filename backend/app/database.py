@@ -30,6 +30,13 @@ def _add_missing_columns(connection: Connection) -> None:
             "bail_result": "VARCHAR",
             "bail_factors": "JSON",
         },
+        "documents": {
+            "bail_proceeding": "VARCHAR",
+            "bail_result": "VARCHAR",
+            "bail_grounds": "JSON",
+            "bail_case_material": "JSON",
+            "bail_case_note": "TEXT",
+        },
         "statute_snapshots": {
             "in_force_from": "DATE",
             "in_force_to": "DATE",
@@ -46,6 +53,10 @@ def _add_missing_columns(connection: Connection) -> None:
         for name, column_type in columns.items():
             if name not in existing:
                 connection.execute(text(f"ALTER TABLE {table} ADD COLUMN {name} {column_type}"))
+    document_columns = {column["name"] for column in inspect(connection).get_columns("documents")}
+    if {"bail_grounds", "bail_case_material"}.issubset(document_columns):
+        connection.execute(text("UPDATE documents SET bail_grounds = '[]' WHERE bail_grounds IS NULL"))
+        connection.execute(text("UPDATE documents SET bail_case_material = '[]' WHERE bail_case_material IS NULL"))
 
 
 def _add_annotation_indexes(connection: Connection) -> None:
@@ -57,6 +68,10 @@ def _add_annotation_indexes(connection: Connection) -> None:
             "USING fts5(annotation_id UNINDEXED, proposition, commentary, paragraph_text)"
         )
     )
+
+
+def _add_document_facet_indexes(connection: Connection) -> None:
+    connection.execute(text("CREATE INDEX IF NOT EXISTS ix_document_facets_lookup ON document_facets (facet_type, value, document_id)"))
 
 
 def _add_ontology_registry_indexes(connection: Connection) -> None:
@@ -72,6 +87,9 @@ MIGRATIONS: tuple[tuple[str, Callable[[Connection], None]], ...] = (
     ("0001_legacy_columns", _add_missing_columns),
     ("0002_annotation_foundation", _add_annotation_indexes),
     ("0003_ontology_registry", _add_ontology_registry_indexes),
+    ("0004_document_bail_context", _add_missing_columns),
+    ("0005_bail_case_profile", _add_missing_columns),
+    ("0006_document_facets", _add_document_facet_indexes),
 )
 
 

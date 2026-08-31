@@ -3,9 +3,10 @@ import { Annotation, api, Document, Ontology, Paragraph, StatuteComparison, Stat
 
 type Workspace = "library" | "code";
 type AnnotationDraft = Omit<Annotation, "id" | "ontology_version" | "created_at" | "updated_at" | "decision_track"> & { decision_track: string };
+type CaseContextDraft = { bail_proceeding: string; bail_result: string; bail_grounds: string[]; bail_case_material: string[]; bail_case_note: string };
 
 const emptyDraft = (documentId = ""): AnnotationDraft => ({
-  document_id: documentId, paragraph_ids: [], proposition: "", decision_track: "", bail_proceeding: null, bail_issue: null, bail_result: null, bail_factors: [], annotation_type: "Principle", areas: ["Bail"], authority_weight: "Routine", function: "", relationship_type: null, boundary: null, triggers: [], commentary: null, related_authorities: [],
+  document_id: documentId, paragraph_ids: [], proposition: "", decision_track: "", bail_proceeding: null, bail_issue: null, bail_result: null, annotation_type: "Principle", areas: ["Bail"], authority_weight: "Routine", function: "States Rule", relationship_type: null, boundary: null, triggers: [], commentary: null, related_authorities: [],
 });
 
 function Options({ values }: { values: string[] }) {
@@ -21,8 +22,12 @@ export default function App() {
   const [paragraphs, setParagraphs] = useState<Paragraph[]>([]);
   const [selectedParagraphs, setSelectedParagraphs] = useState<string[]>([]);
   const [draft, setDraft] = useState<AnnotationDraft>(emptyDraft());
+  const [caseContext, setCaseContext] = useState<CaseContextDraft>({ bail_proceeding: "", bail_result: "", bail_grounds: [], bail_case_material: [], bail_case_note: "" });
+  const [editingCaseContext, setEditingCaseContext] = useState(false);
   const [annotations, setAnnotations] = useState<Annotation[]>([]);
   const [search, setSearch] = useState("");
+  const [groundFilter, setGroundFilter] = useState("");
+  const [caseMaterialFilter, setCaseMaterialFilter] = useState("");
   const [snapshots, setSnapshots] = useState<StatuteSnapshot[]>([]);
   const [selectedSnapshot, setSelectedSnapshot] = useState<StatuteSnapshot | null>(null);
   const [provisions, setProvisions] = useState<StatuteProvision[]>([]);
@@ -37,6 +42,7 @@ export default function App() {
 
   const vocab = ontology?.vocabularies ?? {};
   const selectedParagraphSet = useMemo(() => new Set(selectedParagraphs), [selectedParagraphs]);
+  const hasBailCaseContext = Boolean(selectedDocument?.bail_proceeding && selectedDocument?.bail_result);
 
   async function refreshDocuments() {
     const next = await api.documents();
@@ -57,17 +63,19 @@ export default function App() {
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
-      api.annotations(search).then(setAnnotations).catch((error: Error) => setMessage(error.message));
+      api.annotations({ q: search, bail_ground: groundFilter, bail_case_material: caseMaterialFilter }).then(setAnnotations).catch((error: Error) => setMessage(error.message));
     }, 150);
     return () => window.clearTimeout(timer);
-  }, [search]);
+  }, [search, groundFilter, caseMaterialFilter]);
 
   useEffect(() => {
     if (!selectedDocument) { setParagraphs([]); return; }
     api.paragraphs(selectedDocument.id).then((next) => {
       setParagraphs(next); setSelectedParagraphs([]); setDraft(emptyDraft(selectedDocument.id));
+      setCaseContext({ bail_proceeding: selectedDocument.bail_proceeding || "", bail_result: selectedDocument.bail_result || "", bail_grounds: selectedDocument.bail_grounds || [], bail_case_material: selectedDocument.bail_case_material || [], bail_case_note: selectedDocument.bail_case_note || "" });
+      setEditingCaseContext(false);
     }).catch((error: Error) => setMessage(error.message));
-  }, [selectedDocument]);
+  }, [selectedDocument?.id]);
 
   useEffect(() => {
     if (!selectedSnapshot) { setProvisions([]); setSectionPage(null); return; }
@@ -101,7 +109,6 @@ export default function App() {
       bail_proceeding: decision_track === "Bail" ? current.bail_proceeding : null,
       bail_issue: decision_track === "Bail" ? current.bail_issue : null,
       bail_result: decision_track === "Bail" ? current.bail_result : null,
-      bail_factors: decision_track === "Bail" ? current.bail_factors : [],
     }));
   }
 
@@ -119,14 +126,36 @@ export default function App() {
 
   async function saveAnnotation() {
     if (!selectedDocument) return;
-    if (!draft.decision_track || !draft.function || (draft.decision_track === "Bail" && (!draft.bail_proceeding || !draft.bail_issue || !draft.bail_result))) {
-      setMessage("Choose the passage function and, for Bail, the proceeding, point of law, and result.");
+    if (!draft.decision_track || !draft.function || (draft.decision_track === "Bail" && (!hasBailCaseContext || !draft.bail_issue))) {
+      setMessage("Choose the passage function and, for Bail, save the case context and choose the point of law.");
       return;
     }
     setBusy(true); setMessage("Saving human annotation…");
     try {
-      const saved = await api.createAnnotation({ ...draft, document_id: selectedDocument.id, paragraph_ids: selectedParagraphs });
-      setAnnotations((current) => [saved, ...current]); setDraft(emptyDraft(selectedDocument.id)); setSelectedParagraphs([]); setMessage("Annotation saved with paragraph provenance.");
+      const saved = await api.createAnnotation({ ...draft, document_id: selectedDocument.id, paragraph_ids: selectedParagraphs, bail_proceeding: selectedDocument.bail_proceeding, bail_result: selectedDocument.bail_result });
+      setAnnotations((current) => [saved, ...current]);
+      if (["Primary ground", "Secondary ground", "Tertiary ground"].includes(saved.bail_issue || "")) {
+        const grounds = selectedDocument.bail_grounds.includes(saved.bail_issue || "") ? selectedDocument.bail_grounds : [...selectedDocument.bail_grounds, saved.bail_issue as string];
+        const refreshedDocument = { ...selectedDocument, bail_grounds: grounds };
+        setSelectedDocument(refreshedDocument);
+        setDocuments((current) => current.map((document) => document.id === refreshedDocument.id ? refreshedDocument : document));
+      }
+      setDraft(emptyDraft(selectedDocument.id)); setSelectedParagraphs([]); setMessage("Annotation saved with paragraph provenance.");
+    } catch (error) { setMessage((error as Error).message); }
+    finally { setBusy(false); }
+  }
+
+  async function saveCaseContext() {
+    if (!selectedDocument || !caseContext.bail_proceeding || !caseContext.bail_result) {
+      setMessage("Choose both the Bail proceeding and case result.");
+      return;
+    }
+    setBusy(true); setMessage("Saving Bail case context…");
+    try {
+      const saved = await api.updateDocumentCaseContext(selectedDocument.id, caseContext);
+      setDocuments((current) => current.map((document) => document.id === saved.id ? saved : document));
+      setSelectedDocument(saved); setEditingCaseContext(false);
+      setMessage("Bail case profile saved. Existing and new Bail annotations use its proceeding and result.");
     } catch (error) { setMessage((error as Error).message); }
     finally { setBusy(false); }
   }
@@ -250,36 +279,26 @@ export default function App() {
 <div>{(vocab["Research Track"] ?? []).map((track) => <button type="button" key={track} className={draft.decision_track === track ? "active" : ""} onClick={() => chooseDecisionTrack(track)}>{track === "Charter and Procedure" ? "Charter / procedure" : track}</button>)}</div>
 </fieldset>
 {draft.decision_track === "Bail" && <>
-<section className="bail-case-context">
-<p>Case context</p>
-<Select label="Proceeding" value={draft.bail_proceeding || ""} values={["", ...(vocab["Bail Proceeding"] ?? [])]} onChange={(bail_proceeding) => setDraft({ ...draft, bail_proceeding: bail_proceeding || null })} />
-<Select label="Result" value={draft.bail_result || ""} values={["", ...(vocab["Bail Result"] ?? [])]} onChange={(bail_result) => setDraft({ ...draft, bail_result: bail_result || null })} />
-</section>
+{(!hasBailCaseContext || editingCaseContext) ? <section className="bail-case-context">
+<div><strong>Bail case profile</strong><span>Set this once for {selectedDocument.title}. Grounds and material are case-level retrieval data.</span></div>
+<Select label="Proceeding" value={caseContext.bail_proceeding} values={["", ...(vocab["Bail Proceeding"] ?? [])]} onChange={(bail_proceeding) => setCaseContext({ ...caseContext, bail_proceeding })} />
+<Select label="Result" value={caseContext.bail_result} values={["", ...(vocab["Bail Result"] ?? [])]} onChange={(bail_result) => setCaseContext({ ...caseContext, bail_result })} />
+<FactorPicker label="Grounds in issue" values={vocab["Bail Grounds"] ?? []} selected={caseContext.bail_grounds} onChange={(bail_grounds) => setCaseContext({ ...caseContext, bail_grounds })} />
+<FactorPicker label="Case-specific material" values={vocab["Bail Case Material"] ?? []} selected={caseContext.bail_case_material} onChange={(bail_case_material) => setCaseContext({ ...caseContext, bail_case_material })} />
+<label className="case-note">Case note <textarea value={caseContext.bail_case_note} onChange={(event) => setCaseContext({ ...caseContext, bail_case_note: event.target.value })} placeholder="Required if using Other; otherwise optional." /></label>
+<div className="case-context-actions"><button type="button" onClick={() => void saveCaseContext()} disabled={busy || !caseContext.bail_proceeding || !caseContext.bail_result}>Save case profile</button>{hasBailCaseContext && <button type="button" onClick={() => { setCaseContext({ bail_proceeding: selectedDocument.bail_proceeding || "", bail_result: selectedDocument.bail_result || "", bail_grounds: selectedDocument.bail_grounds || [], bail_case_material: selectedDocument.bail_case_material || [], bail_case_note: selectedDocument.bail_case_note || "" }); setEditingCaseContext(false); }}>Cancel</button>}</div>
+</section> : <section className="case-context-summary"><div><span>Bail case profile</span><strong>{selectedDocument.bail_proceeding} · {selectedDocument.bail_result}</strong><small>{[...selectedDocument.bail_grounds, ...selectedDocument.bail_case_material].join(" · ") || "No case-specific tags yet"}</small></div><button type="button" onClick={() => setEditingCaseContext(true)}>Edit</button></section>}
 <section className="proposition-card">
-<div><strong>Proposition</strong><span>Classify the highlighted passage itself.</span></div>
+<div><strong>Proposition</strong><span>Classify the highlighted passage's central point of law.</span></div>
 <Select label="Point of bail law" value={draft.bail_issue || ""} values={["", ...(vocab["Bail Issue"] ?? [])]} onChange={(bail_issue) => setDraft({ ...draft, bail_issue: bail_issue || null })} />
 <Select label="What does this passage do?" value={draft.function} values={["", ...(vocab.Function ?? [])]} onChange={(functionValue) => setDraft({ ...draft, function: functionValue })} />
-<FactorPicker values={vocab["Bail Factors"] ?? []} selected={draft.bail_factors} onChange={(bail_factors) => setDraft({ ...draft, bail_factors })} />
 <label>Proposition<textarea value={draft.proposition} onKeyDown={annotationKeys} onChange={(event) => setDraft({ ...draft, proposition: event.target.value })} placeholder="State the legal proposition in your own words." />
 </label>
 </section>
 </>}
 {draft.decision_track && draft.decision_track !== "Bail" && <label>Proposition<textarea value={draft.proposition} onKeyDown={annotationKeys} onChange={(event) => setDraft({ ...draft, proposition: event.target.value })} placeholder="State the legal proposition in your own words." />
 </label>}
-<details className="annotation-more">
-<summary>Additional legal context <span>optional</span></summary>
-<div className="field-grid">
-<Select label="Type" value={draft.annotation_type} values={vocab.Type} onChange={(annotation_type) => setDraft({ ...draft, annotation_type })} />
-<Select label="Authority" value={draft.authority_weight} values={vocab["Authority Weight"]} onChange={(authority_weight) => setDraft({ ...draft, authority_weight })} />
-<Select label="Area" value={draft.areas[0]} values={vocab.Area} onChange={(area) => setDraft({ ...draft, areas: [area] })} />
-{draft.decision_track !== "Bail" && <Select label="Function" value={draft.function} values={["", ...(vocab.Function ?? [])]} onChange={(functionValue) => setDraft({ ...draft, function: functionValue })} />}
-<Select label="Boundary" value={draft.boundary || ""} values={["", ...(vocab.Boundary ?? [])]} onChange={(boundary) => setDraft({ ...draft, boundary: boundary || null })} />
-<Select label="Trigger" value={draft.triggers[0] || ""} values={["", ...(vocab.Trigger ?? [])]} onChange={(trigger) => setDraft({ ...draft, triggers: trigger ? [trigger] : [] })} />
-</div>
-<label>Commentary <textarea value={draft.commentary ?? ""} onChange={(event) => setDraft({ ...draft, commentary: event.target.value || null })} placeholder="Optional context, limitation, or why this matters." />
-</label>
-</details>
-<button className="primary" disabled={busy || !draft.decision_track || !draft.function || !draft.proposition || selectedParagraphs.length === 0 || (draft.decision_track === "Bail" && (!draft.bail_proceeding || !draft.bail_issue || !draft.bail_result))} onClick={() => void saveAnnotation()}>Save annotation <kbd>⌘↵</kbd>
+<button className="primary" disabled={busy || !draft.decision_track || !draft.function || !draft.proposition || selectedParagraphs.length === 0 || (draft.decision_track === "Bail" && (!hasBailCaseContext || !draft.bail_issue))} onClick={() => void saveAnnotation()}>Save annotation <kbd>⌘↵</kbd>
 </button>
 </> : <Empty text="Select a judgment to annotate." />}</aside>
         </section>
@@ -287,11 +306,13 @@ export default function App() {
 <div className="panel-heading">
 <h2>Saved propositions</h2>
 <div className="annotation-actions"><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search annotations and source text" />
+<select aria-label="Filter by grounds in issue" value={groundFilter} onChange={(event) => setGroundFilter(event.target.value)}><option value="">All grounds</option><Options values={vocab["Bail Grounds"] ?? []} /></select>
+<select aria-label="Filter by case-specific material" value={caseMaterialFilter} onChange={(event) => setCaseMaterialFilter(event.target.value)}><option value="">All case material</option><Options values={vocab["Bail Case Material"] ?? []} /></select>
 <button disabled={busy} onClick={() => void createBackup()}>Back up</button>
 <a href="/api/exports/annotations">Export</a></div>
 </div>{annotations.slice(0, 12).map((annotation) => <article key={annotation.id}>
 <p>{annotation.proposition}</p>
-<small>{annotation.decision_track || "Legacy annotation"}{annotation.bail_issue ? ` · ${annotation.bail_issue}` : ""} · {annotation.annotation_type} · {annotation.authority_weight}</small>{annotation.bail_factors.length > 0 && <small>{annotation.bail_factors.join(" · ")}</small>}
+<small>{annotation.decision_track || "Legacy annotation"}{annotation.bail_issue ? ` · ${annotation.bail_issue}` : ""} · {annotation.annotation_type} · {annotation.authority_weight}</small>
 </article>)}</section>
       </> : <section className="code-layout">
 <div className="code-toolbar">
@@ -331,8 +352,8 @@ function Select({ label, value, values = [], onChange }: { label: string; value:
 </label>;
 }
 
-function FactorPicker({ values, selected, onChange }: { values: string[]; selected: string[]; onChange: (values: string[]) => void }) {
-  return <details className="bail-factors"><summary>Add bail factors <span>{selected.length ? `${selected.length} selected` : "optional"}</span></summary><div>{values.map((factor) => <button type="button" key={factor} className={selected.includes(factor) ? "active" : ""} aria-pressed={selected.includes(factor)} onClick={() => onChange(selected.includes(factor) ? selected.filter((value) => value !== factor) : [...selected, factor])}>{factor}</button>)}</div></details>;
+function FactorPicker({ label, values, selected, onChange }: { label: string; values: string[]; selected: string[]; onChange: (values: string[]) => void }) {
+  return <details className="bail-factors"><summary>{label} <span>{selected.length ? `${selected.length} selected` : "optional"}</span></summary><div>{values.map((factor) => <button type="button" key={factor} className={selected.includes(factor) ? "active" : ""} aria-pressed={selected.includes(factor)} onClick={() => onChange(selected.includes(factor) ? selected.filter((value) => value !== factor) : [...selected, factor])}>{factor}</button>)}</div></details>;
 }
 
 function Empty({ text }: { text: string }) { return <p className="muted empty-state">{text}</p>; }

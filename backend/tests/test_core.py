@@ -110,16 +110,17 @@ def test_annotation_validation_and_statute_lookup(monkeypatch, tmp_path) -> None
     with TestClient(app) as client:
         assert client.get("/api/health").json() == {"status": "ok"}
         ontology = client.get("/api/ontology").json()
-        assert ontology["version"] == "0.4.0"
+        assert ontology["version"] == "0.7.0"
         assert ontology["snapshot"]["annotation_fields"][0]["field"] == "Case"
         assert ontology["vocabularies"]["Research Track"] == ["Merits", "Sentencing", "Bail", "Charter and Procedure", "Other"]
         assert "Appeal granted" in ontology["vocabularies"]["Bail Result"]
-        assert "Indigenous accused / Gladue" in ontology["vocabularies"]["Bail Factors"]
+        assert ontology["vocabularies"]["Bail Grounds"] == ["Primary ground", "Secondary ground", "Tertiary ground"]
+        assert "Indigenous accused / Gladue" in ontology["vocabularies"]["Bail Case Material"]
         registered_ontologies = client.get("/api/ontology/versions")
         assert registered_ontologies.status_code == 200
-        assert registered_ontologies.json()[0]["version"] == "0.4.0"
-        assert registered_ontologies.json()[0]["snapshot_json"]["vocabulary_definitions"]["Bail Factors"][0]["value"] == "Ground — Primary"
-        assert client.get("/api/ontology/value-migrations").json() == []
+        assert registered_ontologies.json()[0]["version"] == "0.7.0"
+        assert registered_ontologies.json()[0]["snapshot_json"]["vocabulary_definitions"]["Bail Grounds"][0]["value"] == "Primary ground"
+        assert {item["previous_value"] for item in client.get("/api/ontology/value-migrations").json()} >= {"Onus", "Detention ground", "Condition", "Reasons"}
 
         imported = client.post("/api/statutes/criminal-code/import")
         assert imported.status_code == 201, imported.text
@@ -144,36 +145,58 @@ def test_annotation_validation_and_statute_lookup(monkeypatch, tmp_path) -> None
             session.commit()
             document_id, paragraph_id = document.id, paragraph.id
 
+        case_context = client.patch(f"/api/documents/{document_id}/case-context", json={
+            "bail_proceeding": "Initial release (ss. 515/516)",
+            "bail_result": "Detained",
+            "bail_grounds": ["Secondary ground"],
+            "bail_case_material": ["Indigenous accused / Gladue"],
+        })
+        assert case_context.status_code == 200, case_context.text
+        assert case_context.json()["bail_result"] == "Detained"
+        assert case_context.json()["bail_grounds"] == ["Secondary ground"]
+
         annotation = client.post("/api/annotations", json={
             "document_id": document_id,
             "paragraph_ids": [paragraph_id],
             "proposition": "The court states a bail principle.",
             "decision_track": "Bail",
-            "bail_proceeding": "Initial release (ss. 515/516)",
-            "bail_issue": "Detention ground",
-            "bail_result": "Detained",
-            "bail_factors": ["Ground — Tertiary", "Indigenous accused / Gladue"],
+            "bail_issue": "Secondary ground",
             "annotation_type": "Principle",
             "areas": ["Bail"],
             "authority_weight": "Routine",
             "function": "States Rule",
         })
         assert annotation.status_code == 201, annotation.text
-        assert annotation.json()["ontology_version"] == "0.4.0"
-        assert annotation.json()["bail_issue"] == "Detention ground"
-        assert annotation.json()["bail_factors"] == ["Ground — Tertiary", "Indigenous accused / Gladue"]
+        assert annotation.json()["ontology_version"] == "0.7.0"
+        assert annotation.json()["bail_proceeding"] == "Initial release (ss. 515/516)"
+        assert annotation.json()["bail_issue"] == "Secondary ground"
 
         retrieved = client.get("/api/annotations", params=[
-            ("bail_factor", "Ground — Tertiary"),
-            ("bail_factor", "Indigenous accused / Gladue"),
+            ("bail_ground", "Secondary ground"),
+            ("bail_case_material", "Indigenous accused / Gladue"),
             ("bail_result", "Detained"),
         ])
         assert retrieved.status_code == 200
         assert [item["id"] for item in retrieved.json()] == [annotation.json()["id"]]
 
+        automatically_scoped = client.post("/api/annotations", json={
+            "document_id": document_id,
+            "paragraph_ids": [paragraph_id],
+            "proposition": "Primary-ground proposition.",
+            "decision_track": "Bail",
+            "bail_issue": "Primary ground",
+            "annotation_type": "Principle",
+            "areas": ["Bail"],
+            "authority_weight": "Routine",
+            "function": "States Rule",
+        })
+        assert automatically_scoped.status_code == 201, automatically_scoped.text
+        profile = client.get(f"/api/documents/{document_id}")
+        assert profile.json()["bail_grounds"] == ["Secondary ground", "Primary ground"]
+
         full_text = client.get("/api/annotations", params={"q": "test proposition"})
         assert full_text.status_code == 200
-        assert [item["id"] for item in full_text.json()] == [annotation.json()["id"]]
+        assert annotation.json()["id"] in [item["id"] for item in full_text.json()]
 
         revisions = client.get(f"/api/annotations/{annotation.json()['id']}/revisions")
         assert revisions.status_code == 200
@@ -193,12 +216,26 @@ def test_annotation_validation_and_statute_lookup(monkeypatch, tmp_path) -> None
         assert [item["revision_number"] for item in revisions.json()] == [2, 1]
         assert revisions.json()[0]["change_note"] == "Clarified wording."
 
+        corrected_context = client.patch(f"/api/documents/{document_id}/case-context", json={
+            "bail_proceeding": "Initial release (ss. 515/516)",
+            "bail_result": "Released",
+            "bail_grounds": ["Secondary ground", "Primary ground"],
+            "bail_case_material": ["Indigenous accused / Gladue"],
+        })
+        assert corrected_context.status_code == 200, corrected_context.text
+        corrected_annotation = client.get("/api/annotations", params={"bail_result": "Released"})
+        assert annotation.json()["id"] in [item["id"] for item in corrected_annotation.json()]
+        revisions = client.get(f"/api/annotations/{annotation.json()['id']}/revisions")
+        assert [item["revision_number"] for item in revisions.json()] == [3, 2, 1]
+        assert revisions.json()[0]["change_note"] == "Updated inherited case context"
+
         exported = client.get("/api/exports/annotations")
         assert exported.status_code == 200
         export = exported.json()
         assert export["format"] == "heimdall-annotation-export"
         assert export["format_version"] == 1
         assert export["annotations"][0]["document"]["title"] == "R. v. Test"
+        assert export["annotations"][0]["document"]["bail_grounds"] == ["Secondary ground", "Primary ground"]
         assert export["annotations"][0]["paragraphs"][0]["id"] == paragraph_id
 
         backup = client.post("/api/backups")
@@ -231,7 +268,7 @@ def test_registered_ontology_version_cannot_be_rewritten(monkeypatch, tmp_path) 
     monkeypatch.setattr("app.ontology.ONTOLOGY_PATH", altered)
     load_ontology.cache_clear()
     with SessionLocal() as session:
-        with pytest.raises(RuntimeError, match="changed after version 0.4.0 was registered"):
+        with pytest.raises(RuntimeError, match="changed after version 0.7.0 was registered"):
             synchronize_ontology_registry(session)
         session.rollback()
     load_ontology.cache_clear()

@@ -45,7 +45,7 @@ All records use stable UUID primary keys, UTC creation and update timestamps, an
 
 ### Document
 
-- `id`, `title`, `neutral_citation`, `court`, `decision_date`
+- `id`, `title`, `neutral_citation`, `court`, `decision_date`, `bail_proceeding`, `bail_result`
 - `source_filename`, `stored_path`, `sha256`
 - `imported_at`, `extraction_status`, `extraction_version`
 
@@ -70,7 +70,7 @@ The initial statute is the Canadian *Criminal Code*, R.S.C. 1985, c. C-46. Impor
 - `relationship`, `boundary`, `trigger`, `commentary`
 - `ontology_version`, `created_at`, `updated_at`, `deleted_at`
 
-An annotation is linked to one or more paragraphs through `annotation_paragraph`. Multi-value classifications (`areas`, `triggers`, and `bail_factors`) are also mirrored into normalized `annotation_facet` records for indexed structured search; their JSON fields remain the canonical user-facing shape. It may link related authorities through `annotation_related_authority`. The exact controlled values and validation rules come only from `ONTOLOGY.md`.
+An annotation is linked to one or more paragraphs through `annotation_paragraph`. For Bail, the case-level proceeding and result are copied onto each annotation and synchronized when the user edits the case profile, preserving both portable exports and annotation revision history. Grounds in issue and case-specific material remain on the case itself, are mirrored into normalized `document_facet` records for indexed structured search, and are never repeated on individual propositions. Passage-level annotations retain one precise Bail Issue; saving a primary, secondary, or tertiary-ground proposition automatically adds that ground to the case profile. Other multi-value annotation classifications (`areas` and `triggers`) are mirrored into `annotation_facet` records. It may link related authorities through `annotation_related_authority`. The exact controlled values and validation rules come only from `ONTOLOGY.md`.
 
 ### Annotation revision
 
@@ -100,6 +100,7 @@ Database migrations are recorded, versioned, and forward-only. A consistent SQLi
 
 - `POST /documents` — import a PDF and metadata
 - `GET /documents` and `GET /documents/{id}` — list or read documents
+- `PATCH /documents/{id}/case-context` — save or correct shared Bail case context
 - `GET /documents/{id}/file` — stream the stored PDF
 - `GET /documents/{id}/paragraphs` — read extracted text
 - `POST /documents/{id}/paragraphs/reextract` — explicitly run extraction again
@@ -123,7 +124,7 @@ The API returns predictable error objects and validates every controlled field a
 1. Import a judgment and confirm its basic metadata.
 2. Review the original PDF alongside extracted paragraphs.
 3. Select one or more exact paragraphs.
-4. Create a proposition using fast keyboard-first controls and ontology defaults.
+4. For a Bail case, save the proceeding and result once, then create propositions using fast keyboard-first controls and ontology defaults.
 5. Save the human-authored annotation and its provenance.
 6. Search, filter, and export the curated corpus.
 

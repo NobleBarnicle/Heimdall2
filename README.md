@@ -29,7 +29,7 @@ Phase 1 supports local PDF import, paragraph extraction and navigation, structur
 
 Annotations are canonical, human-authored records. Each save creates an immutable revision that preserves the selected paragraph IDs, controlled values, commentary, and ontology version at that time. Deleting an annotation is a soft deletion with its own final revision.
 
-Search covers annotation propositions, commentary, and the exact source paragraphs. Structured multi-value classifications (areas, triggers, and bail factors) are also stored as normalized, indexed facets so they remain fast and filterable as the corpus grows.
+Search covers annotation propositions, commentary, and the exact source paragraphs. Structured multi-value classifications (areas and triggers), together with case-level Bail grounds and case-specific material, are stored as normalized, indexed facets so they remain fast and filterable as the corpus grows.
 
 The API applies recorded, forward-only local database migrations. Before it applies a migration to an existing database, it creates a consistent SQLite backup in:
 
